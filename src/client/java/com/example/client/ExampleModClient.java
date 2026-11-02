@@ -271,4 +271,246 @@ public class ExampleModClient implements ClientModInitializer {
         try {
             for (Method m : mc.player.getClass().getMethods()) {
                 if (m.getName().equals("swing") && m.getParameterCount() == 3) {
-                    Class<?> 
+                    Class<?> animClass = m.getParameterTypes()[1];
+                    Object[] consts = animClass.getEnumConstants();
+                    Object anim = (consts != null && consts.length > 0) ? consts[0] : null;
+                    m.invoke(mc.player, InteractionHand.MAIN_HAND, anim, false);
+                    return;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void showStatus(Minecraft mc, String msg) {
+        try {
+            Component comp = Component.literal(msg);
+            for (Method m : mc.player.getClass().getMethods()) {
+                if (m.getName().equals("displayClientMessage") && m.getParameterCount() == 2) {
+                    m.invoke(mc.player, comp, true);
+                    return;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static boolean isAnyScreenOpen(Minecraft mc) {
+        try {
+            for (Field f : Minecraft.class.getDeclaredFields()) {
+                if (Screen.class.isAssignableFrom(f.getType())) {
+                    f.setAccessible(true);
+                    if (f.get(mc) != null) return true;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
+    }
+
+    private static void openMenuScreen(Minecraft mc, Screen screen) {
+        try {
+            for (Method m : Minecraft.class.getMethods()) {
+                if (m.getParameterCount() == 1 && m.getParameterTypes()[0].isAssignableFrom(Screen.class)) {
+                    m.invoke(mc, screen);
+                    return;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static int getSelectedSlot(Minecraft mc) {
+        try {
+            Method m = mc.player.getInventory().getClass().getMethod("getSelectedSlot");
+            return (int) m.invoke(mc.player.getInventory());
+        } catch (Exception e) {
+            try {
+                Field f = mc.player.getInventory().getClass().getDeclaredField("selected");
+                f.setAccessible(true);
+                return f.getInt(mc.player.getInventory());
+            } catch (Exception ex) {
+                return 0;
+            }
+        }
+    }
+
+    private static void setSelectedSlot(Minecraft mc, int slot) {
+        try {
+            Method m = mc.player.getInventory().getClass().getMethod("setSelectedSlot", int.class);
+            m.invoke(mc.player.getInventory(), slot);
+        } catch (Exception e) {
+            try {
+                Field f = mc.player.getInventory().getClass().getDeclaredField("selected");
+                f.setAccessible(true);
+                f.setInt(mc.player.getInventory(), slot);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    public static String getKeyName(int key) {
+        if (key == 0) return "§7НЕТ";
+        if (key < 0) return "§bMOUSE " + (-key + 1);
+        switch (key) {
+            case KEY_RIGHT_SHIFT: return "§bR-SHIFT";
+            case KEY_LEFT_SHIFT: return "§bL-SHIFT";
+            case KEY_LEFT_CONTROL: return "§bL-CTRL";
+            case KEY_RIGHT_CONTROL: return "§bR-CTRL";
+            case KEY_LEFT_ALT: return "§bL-ALT";
+            case KEY_SPACE: return "§bSPACE";
+            case KEY_TAB: return "§bTAB";
+            case KEY_CAPS_LOCK: return "§bCAPS";
+            default:
+                try {
+                    String name = glfwGetKeyName != null ? (String) glfwGetKeyName.invoke(null, key, 0) : null;
+                    if (name != null) return "§b" + name.toUpperCase();
+                } catch (Exception ignored) {
+                }
+                return "§bKEY_" + key;
+        }
+    }
+
+    // ================= МЕНЮШКА НА RIGHT SHIFT =================
+    public static class TuftuMenuScreen extends Screen {
+        private int waitingForBind = 0;
+
+        public TuftuMenuScreen() {
+            super(Component.literal("§b§lTuftu Visuals PvP Menu"));
+        }
+
+        @Override
+        protected void init() {
+            int centerX = this.width / 2;
+            int startY = this.height / 2 - 85;
+
+            String[] swingNames = {"§dПлавный взмах", "§cБыстрый слэш", "§aБез КД", "§7Стандарт"};
+            String[] posNames = {"§aНизко PvP", "§bОчень низко", "§eВысоко", "§7Стандарт"};
+
+            // 1. Визуалы меча + Бинд
+            this.addRenderableWidget(Button.builder(
+                    Component.literal("Визуалы Меча: " + (swordVisuals ? "§a§lВКЛ" : "§c§lВЫКЛ")),
+                    btn -> { swordVisuals = !swordVisuals; refresh(); }
+            ).bounds(centerX - 155, startY, 200, 20).build());
+
+            this.addRenderableWidget(Button.builder(
+                    Component.literal(waitingForBind == 2 ? "§e> Нажмите кнопку <" : "Бинд: " + getKeyName(visualsBind)),
+                    btn -> { waitingForBind = 2; refresh(); }
+            ).bounds(centerX + 50, startY, 105, 20).build());
+
+            // 2. Взмах меча и Позиция меча
+            this.addRenderableWidget(Button.builder(
+                    Component.literal("Взмах: " + swingNames[swingMode]),
+                    btn -> { swingMode = (swingMode + 1) % swingNames.length; refresh(); }
+            ).bounds(centerX - 155, startY + 24, 152, 20).build());
+
+            this.addRenderableWidget(Button.builder(
+                    Component.literal("Позиция: " + posNames[posMode]),
+                    btn -> { posMode = (posMode + 1) % posNames.length; refresh(); }
+            ).bounds(centerX + 3, startY + 24, 152, 20).build());
+
+            // 3. NoHurtCam + Бинд
+            this.addRenderableWidget(Button.builder(
+                    Component.literal("NoHurtCam (Анти-тряска): " + (noHurtCam ? "§a§lВКЛ" : "§c§lВЫКЛ")),
+                    btn -> { noHurtCam = !noHurtCam; refresh(); }
+            ).bounds(centerX - 155, startY + 48, 200, 20).build());
+
+            this.addRenderableWidget(Button.builder(
+                    Component.literal(waitingForBind == 6 ? "§e> Нажмите кнопку <" : "Бинд: " + getKeyName(hurtCamBind)),
+                    btn -> { waitingForBind = 6; refresh(); }
+            ).bounds(centerX + 50, startY + 48, 105, 20).build());
+
+            // 4. Бинд на Эндер-Перл
+            this.addRenderableWidget(Button.builder(
+                    Component.literal("§d§lБросок Эндер-Перла (Авто-свап)"),
+                    btn -> { waitingForBind = 1; refresh(); }
+            ).bounds(centerX - 155, startY + 76, 200, 20).build());
+
+            this.addRenderableWidget(Button.builder(
+                    Component.literal(waitingForBind == 1 ? "§e> Нажмите кнопку <" : "Бинд: " + getKeyName(pearlBind)),
+                    btn -> { waitingForBind = 1; refresh(); }
+            ).bounds(centerX + 50, startY + 76, 105, 20).build());
+
+            // 5. AutoSprint + Бинд
+            this.addRenderableWidget(Button.builder(
+                    Component.literal("AutoSprint (Авто-бег): " + (autoSprint ? "§a§lВКЛ" : "§c§lВЫКЛ")),
+                    btn -> { autoSprint = !autoSprint; refresh(); }
+            ).bounds(centerX - 155, startY + 100, 200, 20).build());
+
+            this.addRenderableWidget(Button.builder(
+                    Component.literal(waitingForBind == 3 ? "§e> Нажмите кнопку <" : "Бинд: " + getKeyName(sprintBind)),
+                    btn -> { waitingForBind = 3; refresh(); }
+            ).bounds(centerX + 50, startY + 100, 105, 20).build());
+
+            // 6. FullBright + Бинд
+            this.addRenderableWidget(Button.builder(
+                    Component.literal("FullBright (Яркость): " + (fullBright ? "§a§lВКЛ" : "§c§lВЫКЛ")),
+                    btn -> { fullBright = !fullBright; refresh(); }
+            ).bounds(centerX - 155, startY + 124, 200, 20).build());
+
+            this.addRenderableWidget(Button.builder(
+                    Component.literal(waitingForBind == 4 ? "§e> Нажмите кнопку <" : "Бинд: " + getKeyName(brightBind)),
+                    btn -> { waitingForBind = 4; refresh(); }
+            ).bounds(centerX + 50, startY + 124, 105, 20).build());
+
+            // 7. Кнопка открытия меню + Закрыть
+            this.addRenderableWidget(Button.builder(
+                    Component.literal(waitingForBind == 5 ? "§e> Нажмите кнопку меню <" : "Кнопка меню: " + getKeyName(menuBind)),
+                    btn -> { waitingForBind = 5; refresh(); }
+            ).bounds(centerX - 155, startY + 152, 180, 20).build());
+
+            this.addRenderableWidget(Button.builder(
+                    Component.literal("§a§lГотово"),
+                    btn -> this.onClose()
+            ).bounds(centerX + 30, startY + 152, 125, 20).build());
+        }
+
+        private void refresh() {
+            this.clearWidgets();
+            this.init();
+        }
+
+        @Override
+        public void tick() {
+            if (waitingForBind == 0) return;
+            long window = getWindow();
+            if (window == 0L) return;
+
+            if (getKeyState(window, KEY_ESCAPE) == KEY_PRESS || getKeyState(window, KEY_DELETE) == KEY_PRESS) {
+                if (waitingForBind != 5) applyBind(0);
+                waitingForBind = 0;
+                refresh();
+                return;
+            }
+
+            for (int key = 32; key <= 348; key++) {
+                if (getKeyState(window, key) == KEY_PRESS) {
+                    applyBind(key);
+                    keyStates.put(key, true);
+                    waitingForBind = 0;
+                    refresh();
+                    return;
+                }
+            }
+
+            for (int m = 2; m <= 4; m++) {
+                if (getMouseState(window, m) == KEY_PRESS) {
+                    applyBind(-m);
+                    keyStates.put(-m, true);
+                    waitingForBind = 0;
+                    refresh();
+                    return;
+                }
+            }
+        }
+
+        private void applyBind(int key) {
+            if (waitingForBind == 1) pearlBind = key;
+            else if (waitingForBind == 2) visualsBind = key;
+            else if (waitingForBind == 3) sprintBind = key;
+            else if (waitingForBind == 4) brightBind = key;
+            else if (waitingForBind == 5 && key != 0) menuBind = key;
+            else if (waitingForBind == 6) hurtCamBind = key;
+        }
+    }
+}
