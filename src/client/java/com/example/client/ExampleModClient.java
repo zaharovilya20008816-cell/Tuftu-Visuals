@@ -1,4 +1,4 @@
-package com.example;
+package com.example.client;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.minecraft.client.Minecraft;
@@ -17,7 +17,7 @@ import java.util.Map;
 
 public class ExampleModClient implements ClientModInitializer {
 
-    // Коды клавиш клавиатуры
+    // Коды клавиш
     public static final int KEY_PRESS = 1;
     public static final int KEY_ESCAPE = 256;
     public static final int KEY_DELETE = 261;
@@ -31,23 +31,26 @@ public class ExampleModClient implements ClientModInitializer {
     public static final int KEY_CAPS_LOCK = 280;
     public static final int KEY_Z = 90;
     public static final int KEY_V = 86;
+    public static final int KEY_B = 66;
 
-    // Настройки функций
+    // Настройки PvP функций
     public static boolean swordVisuals = true;
-    public static int swingMode = 0; // 0: Плавный PvP, 1: Слэш, 2: Спин 360, 3: Выкл
-    public static int scaleMode = 1; // 0: 60%, 1: 75%, 2: 90%, 3: 115%
-    public static int posMode = 0;   // 0: Далеко PvP, 1: Низко, 2: По центру, 3: Стандарт
+    public static int swingMode = 0; // 0: Плавный взмах, 1: Быстрый взмах, 2: Без КД, 3: Стандарт
+    public static int posMode = 0;   // 0: Низко PvP, 1: Очень низко, 2: Высоко, 3: Стандарт
+    public static boolean noHurtCam = true;
     public static boolean autoSprint = true;
     public static boolean fullBright = true;
 
-    // Кнопки биндов (по умолчанию: Меню = Right Shift, Перл = Z, Визуалы = V)
+    // Бинды по умолчанию (Меню = Right Shift, Перл = Z, Визуалы = V, Анти-тряска = B)
     public static int menuBind = KEY_RIGHT_SHIFT;
     public static int pearlBind = KEY_Z;
     public static int visualsBind = KEY_V;
+    public static int hurtCamBind = KEY_B;
     public static int sprintBind = 0;
     public static int brightBind = 0;
 
     private static final Map<Integer, Boolean> keyStates = new HashMap<>();
+    private static int slowSwingTick = 0;
 
     private static Method glfwGetCurrentContext;
     private static Method glfwGetKey;
@@ -85,22 +88,36 @@ public class ExampleModClient implements ClientModInitializer {
             mc.player.removeEffect(MobEffects.NIGHT_VISION);
         }
 
+        // 3. NoHurtCam (Отключение тряски экрана при получении урона)
+        if (noHurtCam) {
+            setIntField(mc.player, "hurtTime", 0);
+        }
+
+        // 4. Визуалы и движение меча в руке
+        if (swordVisuals) {
+            applySwordVisuals(mc);
+        }
+
         long window = getWindow();
         if (window == 0L || isAnyScreenOpen(mc)) return;
 
-        // 3. Открытие меню на Right Shift (или выбранный бинд)
+        // 5. Открытие менюшки на Right Shift
         if (isJustPressed(window, menuBind)) {
             openMenuScreen(mc, new TuftuMenuScreen());
             return;
         }
 
-        // 4. Срабатывание биндов в игре
+        // 6. Срабатывание биндов в игре
         if (isJustPressed(window, pearlBind)) {
             throwPearl(mc);
         }
         if (isJustPressed(window, visualsBind)) {
             swordVisuals = !swordVisuals;
             showStatus(mc, "§b[Tuftu Visuals] §fВизуалы меча: " + (swordVisuals ? "§aВКЛ" : "§cВЫКЛ"));
+        }
+        if (isJustPressed(window, hurtCamBind)) {
+            noHurtCam = !noHurtCam;
+            showStatus(mc, "§b[Tuftu Visuals] §fNoHurtCam: " + (noHurtCam ? "§aВКЛ" : "§cВЫКЛ"));
         }
         if (isJustPressed(window, sprintBind)) {
             autoSprint = !autoSprint;
@@ -109,6 +126,97 @@ public class ExampleModClient implements ClientModInitializer {
         if (isJustPressed(window, brightBind)) {
             fullBright = !fullBright;
             showStatus(mc, "§b[Tuftu Visuals] §fFullBright: " + (fullBright ? "§aВКЛ" : "§cВЫКЛ"));
+        }
+    }
+
+    private static void applySwordVisuals(Minecraft mc) {
+        // Настройка анимации взмаха
+        if (swingMode == 0) { // Плавный PvP взмах
+            int st = getIntField(mc.player, "swingTime");
+            if (st > 0) {
+                slowSwingTick++;
+                if (slowSwingTick % 2 == 0) {
+                    setIntField(mc.player, "swingTime", st - 1);
+                }
+            }
+        } else if (swingMode == 1) { // Быстрый слэш
+            int st = getIntField(mc.player, "swingTime");
+            if (st > 0 && st < 4) {
+                setIntField(mc.player, "swingTime", st + 1);
+            }
+        } else if (swingMode == 2) { // Без опускания меча (Без КД)
+            setIntField(mc.player, "attackStrengthTicker", 100);
+        }
+
+        // Настройка высоты меча на экране
+        float targetHeight = 1.0F;
+        if (posMode == 0) targetHeight = 0.78F;      // Низко PvP
+        else if (posMode == 1) targetHeight = 0.58F; // Очень низко
+        else if (posMode == 2) targetHeight = 1.15F; // Высоко
+
+        if (posMode != 3) {
+            try {
+                for (Field f : Minecraft.class.getDeclaredFields()) {
+                    f.setAccessible(true);
+                    Object obj = f.get(mc);
+                    if (obj != null && obj.getClass().getSimpleName().contains("ItemInHand")) {
+                        setFloatField(obj, "mainHandHeight", targetHeight);
+                        setFloatField(obj, "oMainHandHeight", targetHeight);
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private static int getIntField(Object obj, String name) {
+        try {
+            Class<?> c = obj.getClass();
+            while (c != null) {
+                try {
+                    Field f = c.getDeclaredField(name);
+                    f.setAccessible(true);
+                    return f.getInt(obj);
+                } catch (NoSuchFieldException e) {
+                    c = c.getSuperclass();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return 0;
+    }
+
+    private static void setIntField(Object obj, String name, int val) {
+        try {
+            Class<?> c = obj.getClass();
+            while (c != null) {
+                try {
+                    Field f = c.getDeclaredField(name);
+                    f.setAccessible(true);
+                    f.setInt(obj, val);
+                    return;
+                } catch (NoSuchFieldException e) {
+                    c = c.getSuperclass();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void setFloatField(Object obj, String name, float val) {
+        try {
+            Class<?> c = obj.getClass();
+            while (c != null) {
+                try {
+                    Field f = c.getDeclaredField(name);
+                    f.setAccessible(true);
+                    f.setFloat(obj, val);
+                    return;
+                } catch (NoSuchFieldException e) {
+                    c = c.getSuperclass();
+                }
+            }
+        } catch (Exception ignored) {
         }
     }
 
@@ -163,265 +271,4 @@ public class ExampleModClient implements ClientModInitializer {
         try {
             for (Method m : mc.player.getClass().getMethods()) {
                 if (m.getName().equals("swing") && m.getParameterCount() == 3) {
-                    Class<?> animClass = m.getParameterTypes()[1];
-                    Object anim = animClass.getEnumConstants() != null ? animClass.getEnumConstants()[0] : null;
-                    m.invoke(mc.player, InteractionHand.MAIN_HAND, anim, false);
-                    return;
-                }
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    private static void showStatus(Minecraft mc, String msg) {
-        try {
-            Component comp = Component.literal(msg);
-            for (Method m : mc.player.getClass().getMethods()) {
-                if (m.getName().equals("displayClientMessage") && m.getParameterCount() == 2) {
-                    m.invoke(mc.player, comp, true);
-                    return;
-                }
-            }
-            for (Method m : mc.gui.getClass().getMethods()) {
-                if (m.getName().contains("Overlay") && m.getParameterCount() >= 1) {
-                    if (m.getParameterCount() == 1) m.invoke(mc.gui, comp);
-                    else if (m.getParameterCount() == 2) m.invoke(mc.gui, comp, false);
-                    return;
-                }
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    private static boolean isAnyScreenOpen(Minecraft mc) {
-        try {
-            for (Field f : Minecraft.class.getDeclaredFields()) {
-                if (Screen.class.isAssignableFrom(f.getType())) {
-                    f.setAccessible(true);
-                    if (f.get(mc) != null) return true;
-                }
-            }
-            for (Method m : Minecraft.class.getMethods()) {
-                if (m.getParameterCount() == 0 && Screen.class.isAssignableFrom(m.getReturnType())) {
-                    if (m.invoke(mc) != null) return true;
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return false;
-    }
-
-    private static void openMenuScreen(Minecraft mc, Screen screen) {
-        try {
-            for (Method m : Minecraft.class.getMethods()) {
-                if (m.getParameterCount() == 1 && m.getParameterTypes()[0].isAssignableFrom(Screen.class)) {
-                    m.invoke(mc, screen);
-                    return;
-                }
-            }
-            for (Field f : Minecraft.class.getDeclaredFields()) {
-                f.setAccessible(true);
-                Object sub = f.get(mc);
-                if (sub != null) {
-                    for (Method m : sub.getClass().getMethods()) {
-                        if (m.getParameterCount() == 1 && m.getParameterTypes()[0].isAssignableFrom(Screen.class)) {
-                            m.invoke(sub, screen);
-                            return;
-                        }
-                    }
-                }
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    private static int getSelectedSlot(Minecraft mc) {
-        try {
-            Method m = mc.player.getInventory().getClass().getMethod("getSelectedSlot");
-            return (int) m.invoke(mc.player.getInventory());
-        } catch (Exception e) {
-            try {
-                Field f = mc.player.getInventory().getClass().getDeclaredField("selected");
-                f.setAccessible(true);
-                return f.getInt(mc.player.getInventory());
-            } catch (Exception ex) {
-                return 0;
-            }
-        }
-    }
-
-    private static void setSelectedSlot(Minecraft mc, int slot) {
-        try {
-            Method m = mc.player.getInventory().getClass().getMethod("setSelectedSlot", int.class);
-            m.invoke(mc.player.getInventory(), slot);
-        } catch (Exception e) {
-            try {
-                Field f = mc.player.getInventory().getClass().getDeclaredField("selected");
-                f.setAccessible(true);
-                f.setInt(mc.player.getInventory(), slot);
-            } catch (Exception ignored) {
-            }
-        }
-    }
-
-    public static String getKeyName(int key) {
-        if (key == 0) return "§7НЕТ";
-        if (key < 0) return "§bMOUSE " + (-key + 1);
-        switch (key) {
-            case KEY_RIGHT_SHIFT: return "§bR-SHIFT";
-            case KEY_LEFT_SHIFT: return "§bL-SHIFT";
-            case KEY_LEFT_CONTROL: return "§bL-CTRL";
-            case KEY_RIGHT_CONTROL: return "§bR-CTRL";
-            case KEY_LEFT_ALT: return "§bL-ALT";
-            case KEY_SPACE: return "§bSPACE";
-            case KEY_TAB: return "§bTAB";
-            case KEY_CAPS_LOCK: return "§bCAPS";
-            default:
-                try {
-                    String name = glfwGetKeyName != null ? (String) glfwGetKeyName.invoke(null, key, 0) : null;
-                    if (name != null) return "§b" + name.toUpperCase();
-                } catch (Exception ignored) {
-                }
-                return "§bKEY_" + key;
-        }
-    }
-
-    // ================= МЕНЮШКА НА RIGHT SHIFT =================
-    public static class TuftuMenuScreen extends Screen {
-        private int waitingForBind = 0;
-
-        public TuftuMenuScreen() {
-            super(Component.literal("§b§lTuftu Visuals PvP Menu"));
-        }
-
-        @Override
-        protected void init() {
-            int centerX = this.width / 2;
-            int startY = this.height / 2 - 85;
-
-            String[] swingNames = {"§dПлавный PvP", "§cЖесткий Слэш", "§eСпин 360°", "§7Классика"};
-            String[] scaleNames = {"§bМини (60%)", "§aPvP (75%)", "§eСредний (90%)", "§cБольшой (115%)"};
-            String[] posNames = {"§aДалеко PvP", "§bНизко", "§eПо центру", "§7Стандарт"};
-
-            // 1. Визуалы меча + Бинд
-            this.addRenderableWidget(Button.builder(
-                    Component.literal("Визуалы Меча: " + (swordVisuals ? "§a§lВКЛ" : "§c§lВЫКЛ")),
-                    btn -> { swordVisuals = !swordVisuals; refresh(); }
-            ).bounds(centerX - 155, startY, 200, 20).build());
-
-            this.addRenderableWidget(Button.builder(
-                    Component.literal(waitingForBind == 2 ? "§e> Нажмите кнопку <" : "Бинд: " + getKeyName(visualsBind)),
-                    btn -> { waitingForBind = 2; refresh(); }
-            ).bounds(centerX + 50, startY, 105, 20).build());
-
-            // 2. Анимация удара меча
-            this.addRenderableWidget(Button.builder(
-                    Component.literal("Анимация удара: " + swingNames[swingMode]),
-                    btn -> { swingMode = (swingMode + 1) % swingNames.length; refresh(); }
-            ).bounds(centerX - 155, startY + 24, 310, 20).build());
-
-            // 3. Размер меча
-            this.addRenderableWidget(Button.builder(
-                    Component.literal("Размер меча: " + scaleNames[scaleMode]),
-                    btn -> { scaleMode = (scaleMode + 1) % scaleNames.length; refresh(); }
-            ).bounds(centerX - 155, startY + 48, 152, 20).build());
-
-            // 4. Позиция меча
-            this.addRenderableWidget(Button.builder(
-                    Component.literal("Позиция: " + posNames[posMode]),
-                    btn -> { posMode = (posMode + 1) % posNames.length; refresh(); }
-            ).bounds(centerX + 3, startY + 48, 152, 20).build());
-
-            // 5. Бинд на Эндер-Перл
-            this.addRenderableWidget(Button.builder(
-                    Component.literal("§d§lБросок Эндер-Перла (Авто-свап)"),
-                    btn -> { waitingForBind = 1; refresh(); }
-            ).bounds(centerX - 155, startY + 76, 200, 20).build());
-
-            this.addRenderableWidget(Button.builder(
-                    Component.literal(waitingForBind == 1 ? "§e> Нажмите кнопку <" : "Бинд: " + getKeyName(pearlBind)),
-                    btn -> { waitingForBind = 1; refresh(); }
-            ).bounds(centerX + 50, startY + 76, 105, 20).build());
-
-            // 6. AutoSprint + Бинд
-            this.addRenderableWidget(Button.builder(
-                    Component.literal("AutoSprint (Авто-бег): " + (autoSprint ? "§a§lВКЛ" : "§c§lВЫКЛ")),
-                    btn -> { autoSprint = !autoSprint; refresh(); }
-            ).bounds(centerX - 155, startY + 100, 200, 20).build());
-
-            this.addRenderableWidget(Button.builder(
-                    Component.literal(waitingForBind == 3 ? "§e> Нажмите кнопку <" : "Бинд: " + getKeyName(sprintBind)),
-                    btn -> { waitingForBind = 3; refresh(); }
-            ).bounds(centerX + 50, startY + 100, 105, 20).build());
-
-            // 7. FullBright + Бинд
-            this.addRenderableWidget(Button.builder(
-                    Component.literal("FullBright (Яркость): " + (fullBright ? "§a§lВКЛ" : "§c§lВЫКЛ")),
-                    btn -> { fullBright = !fullBright; refresh(); }
-            ).bounds(centerX - 155, startY + 124, 200, 20).build());
-
-            this.addRenderableWidget(Button.builder(
-                    Component.literal(waitingForBind == 4 ? "§e> Нажмите кнопку <" : "Бинд: " + getKeyName(brightBind)),
-                    btn -> { waitingForBind = 4; refresh(); }
-            ).bounds(centerX - 155 + 205, startY + 124, 105, 20).build());
-
-            // 8. Кнопка открытия меню + Закрыть
-            this.addRenderableWidget(Button.builder(
-                    Component.literal(waitingForBind == 5 ? "§e> Нажмите кнопку меню <" : "Кнопка меню: " + getKeyName(menuBind)),
-                    btn -> { waitingForBind = 5; refresh(); }
-            ).bounds(centerX - 155, startY + 152, 180, 20).build());
-
-            this.addRenderableWidget(Button.builder(
-                    Component.literal("§a§lГотово"),
-                    btn -> this.onClose()
-            ).bounds(centerX + 30, startY + 152, 125, 20).build());
-        }
-
-        private void refresh() {
-            this.clearWidgets();
-            this.init();
-        }
-
-        @Override
-        public void tick() {
-            if (waitingForBind == 0) return;
-            long window = getWindow();
-            if (window == 0L) return;
-
-            if (getKeyState(window, KEY_ESCAPE) == KEY_PRESS || getKeyState(window, KEY_DELETE) == KEY_PRESS) {
-                if (waitingForBind != 5) applyBind(0);
-                waitingForBind = 0;
-                refresh();
-                return;
-            }
-
-            for (int key = 32; key <= 348; key++) {
-                if (getKeyState(window, key) == KEY_PRESS) {
-                    applyBind(key);
-                    keyStates.put(key, true);
-                    waitingForBind = 0;
-                    refresh();
-                    return;
-                }
-            }
-
-            for (int m = 2; m <= 4; m++) {
-                if (getMouseState(window, m) == KEY_PRESS) {
-                    applyBind(-m);
-                    keyStates.put(-m, true);
-                    waitingForBind = 0;
-                    refresh();
-                    return;
-                }
-            }
-        }
-
-        private void applyBind(int key) {
-            if (waitingForBind == 1) pearlBind = key;
-            else if (waitingForBind == 2) visualsBind = key;
-            else if (waitingForBind == 3) sprintBind = key;
-            else if (waitingForBind == 4) brightBind = key;
-            else if (waitingForBind == 5 && key != 0) menuBind = key;
-        }
-    }
-}
+                    Class<?> 
